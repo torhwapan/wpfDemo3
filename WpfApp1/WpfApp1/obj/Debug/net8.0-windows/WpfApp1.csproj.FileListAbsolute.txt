@@ -17,3 +17,4 @@ D:\Professional\myCode\cursor\demo5\WpfApp1\WpfApp1\obj\Debug\net8.0-windows\ref
 D:\Professional\myCode\cursor\demo5\WpfApp1\WpfApp1\obj\Debug\net8.0-windows\WpfApp1.pdb
 D:\Professional\myCode\cursor\demo5\WpfApp1\WpfApp1\obj\Debug\net8.0-windows\WpfApp1.genruntimeconfig.cache
 D:\Professional\myCode\cursor\demo5\WpfApp1\WpfApp1\obj\Debug\net8.0-windows\ref\WpfApp1.dll
+D:\Professional\myCode\cursor\demo5\WpfApp1\WpfApp1\obj\Debug\net8.0-windows\WpfApp1.sourcelink.json

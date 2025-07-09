@@ -36,15 +36,20 @@ namespace WpfApp1
         private void PreviewBtn_Click(object sender, RoutedEventArgs e)
         {
             string sql = SqlInput.Text.Trim();
-            if (!ValidateAndParseSql(sql, out string whereClause, out string errorMsg))
+            ExecuteBtn.IsEnabled = false; // 先禁用执行按钮
+            if (!ValidateAndParseSql(sql, out string whereClause, out string errorMsg, out string selectSql, out bool isComplexWhere))
             {
                 MessageBox.Show(errorMsg, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 ResultGrid.ItemsSource = null;
-                ExecuteBtn.IsEnabled = false;
+                SqlInput.IsReadOnly = false; // 允许继续输入
                 return;
             }
-            // 简单模拟where解析：只支持Id=1
-            previewData = mockData.Where(d => whereClause == "Id=1" ? d.Id == 1 : true).Select(d => new SqlResultModel
+            if (isComplexWhere)
+            {
+                MessageBox.Show($"检测到复杂WHERE条件，已原样拼接select语句，结果仅供参考！\n\n推导出的SELECT语句：{selectSql}", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            // 只支持简单的where条件：Id=1，否则全部展示
+            previewData = mockData.Where(d => !isComplexWhere && whereClause == "Id=1" ? d.Id == 1 : true).Select(d => new SqlResultModel
             {
                 Id = d.Id,
                 Name = d.Name,
@@ -52,6 +57,7 @@ namespace WpfApp1
             }).ToList();
             ResultGrid.ItemsSource = previewData;
             ExecuteBtn.IsEnabled = previewData.Count > 0;
+            SqlInput.IsReadOnly = false; // 允许继续输入
         }
 
         private void ExecuteBtn_Click(object sender, RoutedEventArgs e)
@@ -61,7 +67,6 @@ namespace WpfApp1
                 MessageBox.Show("请先预览影响数据", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-            // 执行：将结果列全部置为“成功”
             foreach (var item in previewData)
             {
                 item.Result = "成功";
@@ -70,10 +75,13 @@ namespace WpfApp1
             ResultGrid.ItemsSource = previewData;
         }
 
-        private bool ValidateAndParseSql(string sql, out string whereClause, out string errorMsg)
+        // 校验和解析SQL，并推导select语句，检测复杂where
+        private bool ValidateAndParseSql(string sql, out string whereClause, out string errorMsg, out string selectSql, out bool isComplexWhere)
         {
             whereClause = "";
             errorMsg = "";
+            selectSql = "";
+            isComplexWhere = false;
             if (string.IsNullOrWhiteSpace(sql))
             {
                 errorMsg = "SQL不能为空";
@@ -94,11 +102,35 @@ namespace WpfApp1
             if (match.Success)
             {
                 whereClause = match.Groups[1].Value.Trim();
+                // 检测复杂where：包含子查询、括号、in、exists等
+                if (whereClause.Contains("(") || whereClause.Contains(" in ") || whereClause.Contains(" exists ") || whereClause.Contains("select ") || whereClause.Contains("SELECT "))
+                {
+                    isComplexWhere = true;
+                }
             }
             else
             {
                 errorMsg = "必须包含WHERE条件";
                 return false;
+            }
+            // 推导select语句
+            if (sql.StartsWith("update", StringComparison.OrdinalIgnoreCase))
+            {
+                var tableMatch = System.Text.RegularExpressions.Regex.Match(sql, @"update\s+(\w+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (tableMatch.Success)
+                {
+                    string table = tableMatch.Groups[1].Value;
+                    selectSql = $"select * from {table} where {whereClause}";
+                }
+            }
+            else if (sql.StartsWith("delete", StringComparison.OrdinalIgnoreCase))
+            {
+                var tableMatch = System.Text.RegularExpressions.Regex.Match(sql, @"delete\s+from\s+(\w+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (tableMatch.Success)
+                {
+                    string table = tableMatch.Groups[1].Value;
+                    selectSql = $"select * from {table} where {whereClause}";
+                }
             }
             return true;
         }
