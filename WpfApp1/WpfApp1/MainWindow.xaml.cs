@@ -33,13 +33,16 @@ namespace WpfApp1
             new SqlResultModel { Id = 3, Name = "王五" }
         };
         private List<SqlResultModel> previewData = new List<SqlResultModel>();
+        private string _lastPreviewedSql = "";
 
         private void PreviewBtn_Click(object sender, RoutedEventArgs e)
         {
             string sql = SqlInput.Text.Trim();
             // 允许以分号结尾，去掉尾部分号
             if (sql.EndsWith(";")) sql = sql.Substring(0, sql.Length - 1).TrimEnd();
-            ExecuteBtn.IsEnabled = false; // 先禁用执行按钮
+            _lastPreviewedSql = sql; // 保存当前SQL
+
+            ExecuteBtn.IsEnabled = false;
             if (!IsSafeSql(sql, out string errorMsg))
             {
                 MessageBox.Show(errorMsg, "SQL防呆校验失败", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -47,6 +50,19 @@ namespace WpfApp1
                 SqlInput.IsReadOnly = false;
                 return;
             }
+
+            // 如果是INSERT语句
+            if (sql.Trim().StartsWith("insert", StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show("INSERT 语句没有预览结果，请直接执行。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                ResultGrid.ItemsSource = null;
+                previewData.Clear();
+                ExecuteBtn.IsEnabled = true;
+                SqlInput.IsReadOnly = false;
+                return;
+            }
+
+            // 如果是UPDATE/DELETE语句
             if (!ConvertToSelect(sql, out string whereClause, out string selectSql, out bool isComplexWhere, out string convertMsg))
             {
                 MessageBox.Show(convertMsg, "SQL解析失败", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -78,6 +94,27 @@ namespace WpfApp1
 
         private void ExecuteBtn_Click(object sender, RoutedEventArgs e)
         {
+            // 如果是INSERT语句
+            if (_lastPreviewedSql.Trim().StartsWith("insert", StringComparison.OrdinalIgnoreCase))
+            {
+                // 简单解析INSERT语句中的值: INSERT ... VALUES (5, 'New User')
+                var valuesMatch = Regex.Match(_lastPreviewedSql, @"values\s*\(([^,]+),\s*'([^']+)'\)", RegexOptions.IgnoreCase);
+                if (valuesMatch.Success && int.TryParse(valuesMatch.Groups[1].Value.Trim(), out int id))
+                {
+                    string name = valuesMatch.Groups[2].Value.Trim();
+                    var newModel = new SqlResultModel { Id = id, Name = name, Result = "插入成功" };
+                    mockData.Add(newModel); // 模拟插入
+                    ResultGrid.ItemsSource = new List<SqlResultModel> { newModel }; // 展示新插入的数据
+                    MessageBox.Show("数据插入成功！", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                else
+                {
+                    MessageBox.Show("无法解析INSERT语句，请使用 'INSERT ... VALUES (数字, '字符串')' 格式。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                return;
+            }
+
+            // 如果是UPDATE/DELETE语句
             if (previewData == null || previewData.Count == 0)
             {
                 MessageBox.Show("请先预览影响数据", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -161,10 +198,12 @@ namespace WpfApp1
                 errorMsg = "SQL不能为空";
                 return false;
             }
-            // 只允许update/delete开头
-            if (!Regex.IsMatch(sql, @"^(update|delete)\s", RegexOptions.IgnoreCase))
+
+            var sqlLower = sql.ToLower();
+            // 只允许update/delete/insert开头
+            if (!Regex.IsMatch(sql, @"^(update|delete|insert)\s", RegexOptions.IgnoreCase))
             {
-                errorMsg = "只允许UPDATE或DELETE语句";
+                errorMsg = "只允许UPDATE、DELETE或INSERT语句";
                 return false;
             }
             // 禁止多条SQL
@@ -174,7 +213,7 @@ namespace WpfApp1
                 return false;
             }
             // 禁止危险关键字
-            string[] dangerWords = { "drop", "truncate", "alter", "insert", "create", "exec", "execute", "merge", "call", "grant", "revoke", "backup", "restore", "replace", "union", "intersect", "minus", "load", "outfile", "dual" };
+            string[] dangerWords = { "drop", "truncate", "alter", "exec", "execute", "merge", "call", "grant", "revoke", "backup", "restore", "replace", "union", "intersect", "minus", "load", "outfile", "dual" };
             foreach (var word in dangerWords)
             {
                 if (Regex.IsMatch(sql, $@"\\b{word}\\b", RegexOptions.IgnoreCase))
@@ -195,24 +234,24 @@ namespace WpfApp1
                 errorMsg = "SQL中包含变量拼接，存在注入风险";
                 return false;
             }
-            // 必须有where
-            if (!Regex.IsMatch(sql, @"where\s+.+", RegexOptions.IgnoreCase))
+            
+            // 对UPDATE/DELETE的特殊校验
+            if (sqlLower.StartsWith("update") || sqlLower.StartsWith("delete"))
             {
-                errorMsg = "必须包含WHERE条件";
-                return false;
+                // 必须有where
+                if (!Regex.IsMatch(sql, @"\bwhere\b\s+.+", RegexOptions.IgnoreCase))
+                {
+                    errorMsg = "UPDATE/DELETE 语句必须包含 WHERE 条件";
+                    return false;
+                }
+                // 禁止全表操作
+                if (Regex.IsMatch(sql, @"\bwhere\b\s+1\s*=\s*1|\bor\s+1\s*=\s*1", RegexOptions.IgnoreCase))
+                {
+                    errorMsg = "WHERE条件存在全表操作风险";
+                    return false;
+                }
             }
-            // 禁止全表操作
-            if (Regex.IsMatch(sql, @"where\s+1\s*=\s*1|or\s+1\s*=\s*1", RegexOptions.IgnoreCase))
-            {
-                errorMsg = "WHERE条件存在全表操作风险";
-                return false;
-            }
-            // 禁止select * from dual
-            if (Regex.IsMatch(sql, @"select\s+\*\s+from\s+dual", RegexOptions.IgnoreCase))
-            {
-                errorMsg = "SQL中包含非法绕过技巧";
-                return false;
-            }
+            
             return true;
         }
     }
