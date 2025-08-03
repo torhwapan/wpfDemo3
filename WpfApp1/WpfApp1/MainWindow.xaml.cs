@@ -87,9 +87,83 @@ namespace WpfApp1
                 MessageBox.Show($"影响数据共{total}条，仅展示前20条！", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 previewData = previewData.Take(20).ToList();
             }
+            
+            // 如果是UPDATE语句，重新排列列顺序，将要修改的字段放到前面
+            if (sql.Trim().StartsWith("update", StringComparison.OrdinalIgnoreCase))
+            {
+                ReorderColumnsForUpdate(sql);
+            }
+            
             ResultGrid.ItemsSource = previewData;
             ExecuteBtn.IsEnabled = previewData.Count > 0;
             SqlInput.IsReadOnly = false;
+        }
+
+        // 重新排列DataGrid列顺序，将要修改的字段放到前面
+        private void ReorderColumnsForUpdate(string updateSql)
+        {
+            try
+            {
+                // 解析UPDATE语句中的SET部分，提取要修改的字段
+                var setMatch = Regex.Match(updateSql, @"set\s+(.+?)\s+where", RegexOptions.IgnoreCase);
+                if (setMatch.Success)
+                {
+                    string setClause = setMatch.Groups[1].Value.Trim();
+                    var updatedFields = new List<string>();
+                    
+                    // 解析SET子句中的字段名（支持带别名的字段：t.Name=value, t.Age=value）
+                    var fieldMatches = Regex.Matches(setClause, @"(\w+\.)?(\w+)\s*=");
+                    foreach (Match match in fieldMatches)
+                    {
+                        // 正则表达式 (\w+\.)?(\w+)\s*= 的组说明：
+                        // 组1: (\w+\.)? - 可选的别名部分（如 "t."）
+                        // 组2: (\w+) - 字段名部分（如 "Name"）
+                        // 无论是否有别名，字段名都在组2中
+                        string fieldName = match.Groups[2].Value.ToLower();
+                        updatedFields.Add(fieldName);
+                    }
+                    
+                    if (updatedFields.Count > 0)
+                    {
+                        // 重新排列DataGrid列
+                        var columns = ResultGrid.Columns.ToList();
+                        var reorderedColumns = new List<DataGridColumn>();
+                        
+                        // 将要修改的字段列放到前面
+                        foreach (var field in updatedFields)
+                        {
+                            var column = columns.FirstOrDefault(c => 
+                                c.Header.ToString().ToLower() == field || 
+                                (c is DataGridTextColumn textCol && textCol.Binding?.ToString().ToLower().Contains(field) == true));
+                            if (column != null && !reorderedColumns.Contains(column))
+                            {
+                                reorderedColumns.Add(column);
+                            }
+                        }
+                        
+                        // 添加剩余的列
+                        foreach (var column in columns)
+                        {
+                            if (!reorderedColumns.Contains(column))
+                            {
+                                reorderedColumns.Add(column);
+                            }
+                        }
+                        
+                        // 清空并重新添加列
+                        ResultGrid.Columns.Clear();
+                        foreach (var column in reorderedColumns)
+                        {
+                            ResultGrid.Columns.Add(column);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // 如果解析失败，保持原有列顺序
+                Console.WriteLine($"列重排序失败: {ex.Message}");
+            }
         }
 
         private void ExecuteBtn_Click(object sender, RoutedEventArgs e)
